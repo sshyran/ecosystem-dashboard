@@ -3,7 +3,7 @@ module PackageManager
     HAS_VERSIONS = true
     HAS_DEPENDENCIES = true
     BIBLIOTHECARY_SUPPORT = true
-    URL = 'https://godoc.org/'
+    URL = 'https://pkg.go.dev/'
     COLOR = '#375eab'
     KNOWN_HOSTS = [
       'bitbucket.org',
@@ -21,11 +21,11 @@ module PackageManager
 
 
     def self.package_link(package, version = nil)
-      "http://#{package.name}"
+      "https://pkg.go.dev/#{project.name}#{"@#{version}" if version}"
     end
 
     def self.documentation_url(name, version = nil)
-      "http://godoc.org/#{name}"
+      "https://pkg.go.dev/#{name}#{"@#{version}" if version}?tab=doc"
     end
 
     def self.install_instructions(package, version = nil)
@@ -99,11 +99,18 @@ module PackageManager
     end
 
     def self.get_repository_url(package_name)
-      request("https://#{package_name}").to_hash[:url].to_s
+      res = request("https://#{package_name}")
+      res.env.url.to_s if res.success?
     end
 
     def self.get_version(package_name, version)
       get_json("https://proxy.golang.org/#{package_name}/@v/#{version}.info")
+    end
+
+    def self.dependents(name)
+      url = "https://pkg.go.dev/#{project.name}?tab=importedby"
+      page = get_html(url)
+      page.css('.Details-indent a').map(&:text)
     end
   end
 end

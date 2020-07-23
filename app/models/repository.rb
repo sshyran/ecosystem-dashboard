@@ -35,6 +35,9 @@ class Repository < ApplicationRecord
   scope :with_manifests, -> { joins(:manifests) }
   scope :without_manifests, -> { includes(:manifests).where(manifests: {repository_id: nil}) }
 
+  scope :this_period, ->(period) { where('repositories.created_at > ?', period.days.ago) }
+  scope :last_period, ->(period) { where('repositories.created_at > ?', (period*2).days.ago).where('repositories.created_at < ?', period.days.ago) }
+
   def self.download_org_repos(org)
     remote_repos = Issue.github_client.org_repos(org, type: 'public')
     remote_repos.each do |remote_repo|
@@ -105,13 +108,17 @@ class Repository < ApplicationRecord
 
   def download_events(auto_paginate = false)
     client = Octokit::Client.new(access_token: ENV['GITHUB_TOKEN'])
-    events = client.repository_events(full_name, auto_paginate: auto_paginate, headers: {'If-None-Match' => etag})
-    return [] if events == ''
-    new_etag = client.last_response.headers['etag']
-    if !auto_paginate && new_etag && new_etag != etag
-      update_column(:etag, new_etag)
+    begin Octokit::NotFound
+      events = client.repository_events(full_name, auto_paginate: auto_paginate, headers: {'If-None-Match' => etag})
+      return [] if events == ''
+      new_etag = client.last_response.headers['etag']
+      if !auto_paginate && new_etag && new_etag != etag
+        update_column(:etag, new_etag)
+      end
+      events
+    rescue
+      []
     end
-    events
   end
 
   def sync_events(auto_paginate = false)
@@ -131,19 +138,23 @@ class Repository < ApplicationRecord
   end
 
   def self.sync_recently_active_repos(org)
-    repo_names = download_org_events(org).map(&:repo).map(&:name).uniq
-    repo_names.each do |full_name|
-      repo = existing_repo = Repository.find_by_full_name(full_name)
-      repo = Repository.download(full_name) if existing_repo.nil?
-      next unless repo
-      e = repo.sync_events
-      if e.any?
-        if Organization.internal.pluck(:name).include?(org)
-          Issue.download(full_name)
-          Issue.internal.where(repo_full_name: full_name).where('issues.updated_at > ?', 1.hour.ago).each(&:update_extra_attributes)
+    begin
+      repo_names = download_org_events(org).map(&:repo).map(&:name).uniq
+      repo_names.each do |full_name|
+        repo = existing_repo = Repository.find_by_full_name(full_name)
+        repo = Repository.download(full_name) if existing_repo.nil?
+        next unless repo
+        e = repo.sync_events
+        if e.any?
+          if Organization.internal.pluck(:name).include?(org)
+            Issue.download(full_name)
+            Issue.internal.where(repo_full_name: full_name).where('issues.updated_at > ?', 1.hour.ago).each(&:sync)
+          end
+          Repository.download(full_name) if existing_repo
         end
-        Repository.download(full_name) if existing_repo
       end
+    rescue Octokit::NotFound
+      # org deleted
     end
   end
 
@@ -240,7 +251,33 @@ class Repository < ApplicationRecord
   end
 
   def self.find_missing_npm_packages
-    internal.joins(:manifests).where('manifests.filepath ilike ?', '%package.json').uniq.each(&:find_npm_packages)
+    joins(:manifests).where('manifests.filepath ilike ?', '%package.json').uniq.each(&:find_npm_packages)
+
+    Package.platform('npm').each do |package|
+      RepositoryDependency.platform('npm').without_package_id.where(package_name: package.name).update_all(package_id: package.id)
+      Dependency.platform('npm').without_package_id.where(package_name: package.name).update_all(package_id: package.id)
+      package.save
+    end
+  end
+
+  def self.find_missing_cargo_packages
+    joins(:manifests).where('manifests.filepath ilike ?', '%Cargo.toml').uniq.each(&:find_cargo_packages)
+
+    Package.platform('cargo').each do |package|
+      RepositoryDependency.platform('cargo').without_package_id.where(package_name: package.name).update_all(package_id: package.id)
+      Dependency.platform('cargo').without_package_id.where(package_name: package.name).update_all(package_id: package.id)
+      package.save
+    end
+  end
+
+  def self.find_missing_go_packages
+    joins(:manifests).where('manifests.filepath ilike ?', '%go.mod').uniq.each(&:find_go_packages)
+
+    Package.platform('go').each do |package|
+      RepositoryDependency.platform('go').without_package_id.where(package_name: package.name).update_all(package_id: package.id)
+      Dependency.platform('go').without_package_id.where(package_name: package.name).update_all(package_id: package.id)
+      package.save
+    end
   end
 
   def find_npm_packages
@@ -249,7 +286,29 @@ class Repository < ApplicationRecord
 
       if file.present? && file[:content].present?
         json = JSON.parse(file[:content])
-        PackageManager::Npm.update(json['name'])
+        PackageManager::Npm.update(json['name']) if json['name']
+      end
+    end
+  end
+
+  def find_cargo_packages
+    manifests.platform('cargo').where('filepath ilike ?', '%Cargo.toml').each do |manifest|
+      file = manifest.repository.get_file_contents(manifest.filepath)
+
+      if file.present? && file[:content].present?
+        toml = TomlRB.parse(file[:content])
+        PackageManager::Cargo.update(toml['package']['name']) if toml['package']
+      end
+    end
+  end
+
+  def find_go_packages
+    manifests.platform('go').where('filepath ilike ?', '%go.mod').each do |manifest|
+      file = manifest.repository.get_file_contents(manifest.filepath)
+
+      if file.present? && file[:content].present?
+        module_line = file[:content].lines.map(&:strip).map{|line| line.match(/^(module\s+)?(.+)\s+(.+)$/) }.compact.first
+        PackageManager::Go.update(module_line[3].strip) if module_line && module_line[3].strip
       end
     end
   end

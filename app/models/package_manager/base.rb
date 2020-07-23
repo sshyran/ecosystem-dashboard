@@ -95,7 +95,7 @@ module PackageManager
       else
         dbpackage.reformat_repository_url
         attrs = mapped_package.except(:name, :releases, :versions, :version, :dependencies, :properties)
-        dbpackage.update(attrs) if dbpackage.changed?
+        dbpackage.update(attrs)
       end
 
       if self::HAS_VERSIONS
@@ -235,6 +235,10 @@ module PackageManager
 
     def self.deprecation_info(_name)
       { is_deprecated: false, message: nil }
+    end
+
+    def self.dependents(name)
+      []
     end
 
     private_class_method def self.get(url, options = {})

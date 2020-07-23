@@ -21,9 +21,11 @@ class Issue < ApplicationRecord
 
   scope :no_milestone, -> { where(milestone_name: nil) }
   scope :unlabelled, -> { where("labels = '{}'") }
+  scope :label, ->(label) { where("labels @> ARRAY[?]::varchar[]", label) }
 
   scope :org, ->(org) { where(org: org) }
   scope :state, ->(state) { where(state: state) }
+  scope :user, ->(user) { where(user: user) }
 
   scope :open_for_over_2_days, -> { where("DATE_PART('day', issues.closed_at - issues.created_at) > 2 OR issues.closed_at is NULL") }
   scope :slow_response, -> { open_for_over_2_days.where("DATE_PART('day', issues.first_response_at - issues.created_at) > 2 OR issues.first_response_at is NULL") }
@@ -35,8 +37,14 @@ class Issue < ApplicationRecord
   scope :exclude_user, ->(user) { where.not(user: user) }
   scope :exclude_repo, ->(repo_full_name) { where.not(repo_full_name: repo_full_name) }
   scope :exclude_org, ->(org) { where.not(org: org) }
-  scope :exclude_language, ->(language) { where.not('repo_full_name ilike ?', "%/#{language}-%") }
-  scope :exclude_collab, ->(collab) { where.not("collabs @> ARRAY[?]::varchar[]", collab)  }
+  scope :exclude_language, ->(languages) { where('repo_full_name NOT ilike ALL(ARRAY[?])', Array(languages).map{|l| "%/#{l}-%" }) }
+  scope :exclude_collab, ->(collab) { where.not("collabs && ARRAY[?]::varchar[]", collab)  }
+  scope :exclude_label, ->(label) { where.not("labels && ARRAY[?]::varchar[]", label)  }
+
+  scope :this_period, ->(period) { where('issues.created_at > ?', period.days.ago) }
+  scope :last_period, ->(period) { where('issues.created_at > ?', (period*2).days.ago).where('issues.created_at < ?', period.days.ago) }
+  scope :this_week, -> { where('issues.created_at > ?', 1.week.ago) }
+  scope :last_week, -> { where('issues.created_at > ?', 2.week.ago).where('issues.created_at < ?', 1.week.ago) }
 
   belongs_to :repository, foreign_key: :repo_full_name, primary_key: :full_name, optional: true
   belongs_to :contributor, foreign_key: :user, primary_key: :github_username, optional: true
@@ -92,7 +100,8 @@ class Issue < ApplicationRecord
       issue.milestone_name = remote_issue.milestone.try(:title)
       issue.milestone_id = remote_issue.milestone.try(:number)
       issue.labels = remote_issue.labels.map(&:name)
-      issue.save if issue.changed?
+      issue.last_synced_at = Time.zone.now
+      issue.save
     rescue ArgumentError, Octokit::Error
       # derp
     end
@@ -102,30 +111,8 @@ class Issue < ApplicationRecord
     @client ||= Octokit::Client.new(access_token: ENV['GITHUB_TOKEN'], auto_paginate: true)
   end
 
-  def self.org_repo_names(org_name)
-    github_client.org_repos(org_name).map(&:full_name)
-  end
-
-  def self.download_org_repos(org_name)
-    org_repo_names(org_name).each{|repo_full_name| download(repo_full_name) }
-  end
-
   def self.active_repo_names
     Issue.internal.unlocked.where('issues.created_at > ?', 6.months.ago).pluck(:repo_full_name).uniq
-  end
-
-  def self.org_contributor_names(org_name)
-    Issue.org(org_name).not_core.group(:user).count
-  end
-
-  def self.download_new_repos
-    new_repo_names.each{|repo_full_name| download(repo_full_name) }
-  end
-
-  def self.new_repo_names
-    Organization.internal.pluck(:name).map do |org_name|
-      org_repo_names(org_name) - active_repo_names
-    end.flatten
   end
 
   def self.download_active_repos
@@ -134,17 +121,12 @@ class Issue < ApplicationRecord
 
   def self.update_collab_labels
     Issue.unlocked.internal.where('issues.created_at > ?', 1.month.ago).not_core.group(:user).count.each do |u, count|
-      collabs = Event.external.user(u).event_type('PushEvent').group(:org).count.map(&:first)
-      Issue.internal.unlocked.where(user: u).update_all(collabs: collabs)
+      Issue.internal.unlocked.where(user: u).update_all(collabs: Contributor.collabs_for(u))
     end
   end
 
   def pull_request?
     html_url && html_url.match?(/\/pull\//i)
-  end
-
-  def self.sync_pull_requests(time_range = 1.week.ago)
-    internal.pull_requests.where('issues.created_at > ?', time_range).where(merged_at: nil).find_each(&:download_pull_request)
   end
 
   def download_pull_request
@@ -167,7 +149,8 @@ class Issue < ApplicationRecord
     begin
       events = Issue.github_client.issue_timeline(repo_full_name, number, accept: 'application/vnd.github.mockingbird-preview')
       # filter for events by core contributors
-      events = events.select{|e| (e.actor && Contributor.core.pluck(:github_username).include?(e.actor.login)) || (e.user && Contributor.core.pluck(:github_username).include?(e.user.login)) }
+      core_contributor_usernames = Contributor.core.pluck(:github_username)
+      events = events.select{|e| (e.actor && core_contributor_usernames.include?(e.actor.login)) || (e.user && core_contributor_usernames.include?(e.user.login)) }
       # ignore events where actor isn't who acted
       events = events.select{|e| !['subscribed', 'mentioned'].include?(e.event)  }
       # bail if no core contributor response yet
@@ -193,6 +176,7 @@ class Issue < ApplicationRecord
       remote_issue = Issue.github_client.issue(repo_full_name, number)
       Issue.update_from_github(repo_full_name, remote_issue)
       update_extra_attributes
+      update_column(:last_synced_at, Time.zone.now)
     rescue Octokit::NotFound
       destroy
     end

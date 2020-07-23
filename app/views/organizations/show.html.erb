@@ -1,0 +1,168 @@
+<%= link_to "https://github.com/#{@organization.name}", target: :_blank, class: 'float-left mr-3 mt-2' do %>
+  <img src="https://github.com/<%= @organization.name %>.png" class="rounded" height='40' width='40'>
+<% end %>
+<h1>
+  <%= link_to @organization.name, "https://github.com/#{@organization.name}", target: :_blank %>
+</h1>
+
+<div class="container home mt-3">
+  <div class="row">
+    <div class="col-md-3">
+      <a href="<%= collab_repositories_path(order: 'desc', sort: 'created_at', org: @organization.name) %>">
+        <div class="card shadow-sm mb-3">
+          <div class="card-content">
+            <div class="card-body">
+              <div class="media d-flex">
+                <div class="align-self-center">
+                  <%= octicon 'repo', height: 50 %>
+                </div>
+                <div class="media-body text-right">
+                  <span class='info' title='Total active, non-forked repositories in this organization'><%= octicon 'info', height: 14 %></span>
+                  <h3>
+                    <%= number_to_human @repos_count %>
+                  </h3>
+                  <span>Repositories</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </a>
+    </div>
+
+    <div class="col-md-3">
+      <a href="<%= all_issues_path(range: @period, type: 'issues', collab: @organization.name) %>">
+        <div class="card shadow-sm mb-3">
+          <div class="card-content">
+            <div class="card-body">
+              <div class="media d-flex">
+                <div class="align-self-center">
+                  <%= octicon 'issue-opened', height: 50 %>
+                </div>
+                <div class="media-body text-right">
+                  <span class='info' title='Issues on internal repos opened by <%= @organization.name %> contributors in the past <%= @period %> days'><%= octicon 'info', height: 14 %></span>
+                  <h3>
+                    <%= number_to_human @new_issues %>
+
+                    <% new_issue_diff = @new_issues - @new_issues_last_week %>
+                    <% unless new_issue_diff.zero?  %>
+                      <small class='<%= diff_class(new_issue_diff) %>' title='<%= @new_issues_last_week %> new issues in the previous <%= @period %> days'><%= '+' if new_issue_diff > 0 %><%= number_to_human new_issue_diff %></small>
+                    <% end %>
+                  </h3>
+                  <span>Issues</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </a>
+    </div>
+    <div class="col-md-3">
+      <a href="<%= all_issues_path(range: @period, type: 'pull_requests', collab: @organization.name) %>">
+        <div class="card shadow-sm mb-3">
+          <div class="card-content">
+            <div class="card-body">
+              <div class="media d-flex">
+                <div class="align-self-center">
+                  <%= octicon 'git-pull-request', height: 50 %>
+                </div>
+                <div class="media-body text-right">
+                  <span class='info' title='Pull Requests on internal repos opened by <%= @organization.name %> contributors in the past <%= @period %> days'><%= octicon 'info', height: 14 %></span>
+                  <h3>
+                    <%= number_to_human @new_prs %>
+
+                    <% new_pr_diff = @new_prs - @new_prs_last_week %>
+                    <% unless new_pr_diff.zero? %>
+                      <small class='<%= diff_class(new_pr_diff) %>' title='<%= @new_prs_last_week %> new pull requests in the previous <%= @period %> days'><%= '+' if new_pr_diff > 0 %><%= number_to_human new_pr_diff %></small>
+                    <% end %>
+                  </h3>
+                  <span>Pull Requests</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </a>
+    </div>
+    <div class="col-md-3">
+      <a href="<%= slow_response_path(range: @period, collab: @organization.name) %>">
+        <div class="card shadow-sm mb-3">
+          <div class="card-content">
+            <div class="card-body">
+              <div class="media d-flex">
+                <div class="align-self-center">
+                  <%= octicon 'clock', height: 50 %>
+                </div>
+                <div class="media-body text-right">
+                  <span class='info' title='Average time to first response by a core contributor on issues and pull requests opened by <%= @organization.name %> contributors on internal repos in the past <%= @period %> days'><%= octicon 'info', height: 14 %></span>
+                  <h3>
+                    <% if @response_time.zero? %>
+                      N/A
+                    <% else %>
+                      <%= @response_time %><small class='text-muted'>hrs</small>
+                    <% end %>
+                    <% response_time_diff = @response_time - @response_time_last_week %>
+                    <% unless response_time_diff.zero? %>
+                      <small class='<%= diff_class(-response_time_diff) %>' title='<%= @response_time_last_week %> hrs in the previous <%= @period %> days'> <%= '+' if response_time_diff > 0 %><%= number_to_human response_time_diff %></small>
+                    <% end %>
+                  </h3>
+                  <span>Avg Resp Time</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </a>
+    </div>
+  </div>
+</div>
+
+<div class="row p-3">
+  <div class="col-md-9">
+    <ul class="nav nav-tabs mb-3">
+      <li class="nav-item">
+        <a class="nav-link <%= 'active' if params[:tab].blank? || params[:tab] == 'events' %>" href="<%= url_for(request.params.merge(tab: nil)) %>">
+          Activity
+          <span class='badge badge-secondary'><%= @event_scope.count %></span>
+        </a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link <%= 'active' if params[:tab] == 'search' %>" href="<%= url_for(request.params.merge(tab: 'search')) %>">
+          Search results
+          <span class='badge badge-secondary'><%= @search_scope.count %></span>
+        </a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link <%= 'active' if params[:tab] == 'packages' %>" href="<%= url_for(request.params.merge(tab: 'packages')) %>">
+          Package Usage
+          <span class='badge badge-secondary'><%= @repository_dependencies.group_by{|rd| [rd.package,rd.repository] }.length %></span>
+        </a>
+      </li>
+    </ul>
+
+    <%= case params[:tab]
+    when 'search'
+      render 'search'
+    when 'packages'
+      render 'packages'
+    else
+      render 'events'
+    end %>
+
+  </div>
+  <div class="col-md-3">
+    <h5>Contributors</h5>
+    <% @organization.pushing_contributor_names.each do |username| %>
+      <%= link_to "https://github.com/#{username}", target: :_blank, class: 'float-left mr-1 mt-1' do %>
+        <img src="https://github.com/<%= username %>.png" class="rounded" height='40' width='40'>
+      <% end %>
+    <% end %>
+
+    <div class="clearfix"></div>
+    <p>
+      <small class='text-muted'>
+        Last activity: <%= time_ago_in_words @organization.events.last.try(:created_at) || 'Never' %>
+      </small>
+    </p>
+  </div>
+</div>

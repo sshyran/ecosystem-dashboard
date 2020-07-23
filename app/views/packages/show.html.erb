@@ -13,29 +13,7 @@
 </small>
 </p>
 
-<% major_versions = @repository_dependencies.select(&:latest_resolvable_version).group_by{|rd| rd.latest_resolvable_version.semantic_version.major } %>
-<% if major_versions.length > 1 %>
-  <% groups = @repository_dependencies.select(&:latest_resolvable_version).group_by{|rd| rd.latest_resolvable_version.semantic_version.major }.sort_by{|v,rds| v } %>
-<% else %>
-  <% groups = @repository_dependencies.select(&:latest_resolvable_version).group_by{|rd| [rd.latest_resolvable_version.semantic_version.major, rd.latest_resolvable_version.semantic_version.minor] }.sort_by{|v,rds| v } %>
-<% end %>
-
-<% if groups.length > 1 %>
-  <table class='table'>
-    <tr>
-      <th>Version range</th>
-      <th>Usage Percentage</th>
-    </tr>
-    <% groups.each do |version, repository_dependencies| %>
-      <tr>
-        <td>
-          <%= Array(version).join('.') %>.x
-        </td>
-        <td title='<%= repository_dependencies.length %> repos'><%= (repository_dependencies.length.to_f/@repository_dependencies.length*100).round(1) %>%</td>
-      </tr>
-    <% end %>
-  </table>
-<% end %>
+<%= render 'usage' if @package.internal? %>
 
 <h5>Dependent Repositories</h5>
 
@@ -53,7 +31,7 @@
     <div class="card mb-3">
       <div class="card-header p-2 pl-3 pr-3" title='Click to expand/collapse' data-toggle="collapse" href="#org-<%= org %>">
         <%= link_to "https://github.com/#{org}", target: :_blank, class: 'mr-1' do %>
-          <img src="https://github.com/<%= org %>.png" class="rounded" height='18'>
+          <img src="https://github.com/<%= org %>.png" class="rounded" height='18' width='18'>
         <% end %>
         <%= link_to org, org_dependencies_path(org) %>
       </div>
@@ -65,13 +43,6 @@
             <small class='text-muted'>
               <% dep = dependencies.sort_by(&:requirements).first %>
               <%= dependencies.map(&:requirements).uniq.sort.join(', ') %>
-              <% if dep.latest_resolvable_version && dep.outdated? %>
-                <% if major_versions.length < 2 || dep.latest_resolvable_version.semantic_version.major < @package.latest_stable_release.semantic_version.major %>
-                  <span class='badge badge-danger' title='Latest stable version is <%= @package.latest_stable_release_number %>' >Outdated</span>
-                <% else %>
-                  <span class='badge badge-warning' title='Latest stable version is <%= @package.latest_stable_release_number %>' >Outdated</span>
-                <% end %>
-              <% end %>
               <% if dependencies.none?(&:direct?) %>
                 <span class='badge badge-info' title='Pulled in by another dependency' >Transitive</span>
               <% end %>

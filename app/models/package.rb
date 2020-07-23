@@ -1,7 +1,4 @@
 class Package < ApplicationRecord
-  # include PackageSearch
-  # include SourceRank
-  # include Status
   include Releases
 
   include PgSearch::Model
@@ -16,16 +13,14 @@ class Package < ApplicationRecord
                     }
                   }
 
-  # include GithubPackage
-
   validates_presence_of :name, :platform
   validates_uniqueness_of :name, scope: :platform, case_sensitive: true
 
   belongs_to :repository, optional: true
+  has_one :organization, through: :repository
   has_many :versions
   has_many :dependencies, -> { group 'package_name' }, through: :versions
-  # has_many :contributions, through: :repository
-  # has_many :contributors, through: :contributions, source: :repository_user
+
   has_many :tags, through: :repository
   has_many :published_tags, -> { where('published_at IS NOT NULL') }, through: :repository, class_name: 'Tag'
   has_many :dependents, class_name: 'Dependency'
@@ -38,6 +33,8 @@ class Package < ApplicationRecord
   scope :platform, ->(platform) { where(platform: PackageManager::Base.format_name(platform)) }
   scope :lower_platform, ->(platform) { where('lower(packages.platform) = ?', platform.try(:downcase)) }
   scope :lower_name, ->(name) { where('lower(packages.name) = ?', name.try(:downcase)) }
+
+  scope :exclude_platform, ->(platforms) { where.not(platform: platforms.map{|p|PackageManager::Base.format_name(p)}) }
 
   scope :with_homepage, -> { where("homepage <> ''") }
   scope :with_repository_url, -> { where("repository_url <> ''") }
@@ -90,8 +87,14 @@ class Package < ApplicationRecord
   scope :hacker_news, -> { with_repo.where('repositories.stargazers_count > 0').order(Arel.sql("((repositories.stargazers_count-1)/POW((EXTRACT(EPOCH FROM current_timestamp-repositories.created_at)/3600)+2,1.8)) DESC")) }
   scope :recently_created, -> { with_repo.where('repositories.created_at > ?', 2.weeks.ago)}
 
-  scope :internal, -> { where(repository_id: Repository.internal.pluck(:id)) }
+  scope :internal, -> { joins(:organization).where('organizations.internal = ?', true) }
   scope :external, -> { where.not(repository_id: Repository.internal.pluck(:id)) }
+
+  scope :exclude_org, ->(org) { joins(:organization).where('organizations.name != ?', org) }
+  scope :org, ->(org) { joins(:organization).where('organizations.name = ?', org) }
+
+  scope :this_period, ->(period) { where('packages.created_at > ?', period.days.ago) }
+  scope :last_period, ->(period) { where('packages.created_at > ?', (period*2).days.ago).where('packages.created_at < ?', period.days.ago) }
 
   after_commit :update_repository, on: :create
   after_commit :set_dependents_count, on: [:create, :update]
@@ -470,6 +473,10 @@ class Package < ApplicationRecord
 
   def self.set_outdated_percentage
     Package.internal.where('collab_dependent_repos_count > 0').includes(:versions).each(&:set_outdated_percentage)
+  end
+
+  def internal?
+    organization.try(:internal?)
   end
 
   private

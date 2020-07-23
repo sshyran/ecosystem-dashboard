@@ -10,9 +10,10 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema.define(version: 2020_06_15_133314) do
+ActiveRecord::Schema.define(version: 2020_07_23_123556) do
 
   # These are extensions that must be enabled in order to support this database
+  enable_extension "pg_stat_statements"
   enable_extension "plpgsql"
 
   create_table "contributors", force: :cascade do |t|
@@ -51,6 +52,7 @@ ActiveRecord::Schema.define(version: 2020_06_15_133314) do
     t.datetime "updated_at", precision: 6, null: false
     t.index ["actor"], name: "index_events_on_actor"
     t.index ["github_id"], name: "index_events_on_github_id"
+    t.index ["org", "event_type"], name: "index_events_on_org_and_event_type"
   end
 
   create_table "issues", force: :cascade do |t|
@@ -76,6 +78,7 @@ ActiveRecord::Schema.define(version: 2020_06_15_133314) do
     t.datetime "first_response_at"
     t.integer "response_time"
     t.bigint "github_id"
+    t.datetime "last_synced_at"
     t.index ["collabs"], name: "index_issues_on_collabs", using: :gin
     t.index ["created_at"], name: "index_issues_on_created_at"
     t.index ["org"], name: "index_issues_on_org"
@@ -103,6 +106,9 @@ ActiveRecord::Schema.define(version: 2020_06_15_133314) do
     t.boolean "collaborator", default: false
     t.datetime "created_at", precision: 6, null: false
     t.datetime "updated_at", precision: 6, null: false
+    t.string "docker_hub_org"
+    t.integer "search_results_count", default: 0
+    t.integer "events_count", default: 0
   end
 
   create_table "packages", force: :cascade do |t|
@@ -171,6 +177,27 @@ ActiveRecord::Schema.define(version: 2020_06_15_133314) do
     t.index ["manifest_id"], name: "index_repository_dependencies_on_manifest_id"
     t.index ["package_id"], name: "index_repository_dependencies_on_package_id"
     t.index ["repository_id"], name: "index_repository_dependencies_on_repository_id"
+  end
+
+  create_table "search_queries", force: :cascade do |t|
+    t.string "query"
+    t.string "kind"
+    t.string "sort"
+    t.string "order"
+    t.datetime "created_at", precision: 6, null: false
+    t.datetime "updated_at", precision: 6, null: false
+  end
+
+  create_table "search_results", force: :cascade do |t|
+    t.integer "search_query_id"
+    t.string "kind"
+    t.string "repository_full_name"
+    t.string "org"
+    t.string "title"
+    t.string "html_url"
+    t.jsonb "text_matches", default: "{}", null: false
+    t.datetime "created_at", precision: 6, null: false
+    t.datetime "updated_at", precision: 6, null: false
   end
 
   create_table "tags", force: :cascade do |t|

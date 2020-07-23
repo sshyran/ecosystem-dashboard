@@ -107,3 +107,25 @@
     /* symbol for "collapsed" panels */
     content: "+";
 }
+
+.home{
+  small{
+    font-size: 0.7em;
+  }
+  .info{
+    position: absolute;
+    top:0;
+    color: #ccc;
+  }
+
+  .col-md-3 a{
+    color: #000;
+  }
+}
+
+.nav.nav-pills{
+  .nav-link{
+    padding: 0.5rem;
+  }
+
+}
